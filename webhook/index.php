@@ -1,10 +1,5 @@
 <?php
 
-/**
- * Webhook Entry Point - نسخه فیکس شده بدون ارور cb_
- * تمام callback ها با try-catch امن
- */
-
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../classes/Database.php';
 require_once __DIR__ . '/../classes/Logger.php';
@@ -21,6 +16,7 @@ require_once __DIR__ . '/../classes/SecretMeetingRoom.php';
 require_once __DIR__ . '/../classes/Validator.php';
 require_once __DIR__ . '/../classes/RateLimiter.php';
 require_once __DIR__ . '/../classes/ProfanityFilter.php';
+require_once __DIR__ . '/../classes/Game.php';
 require_once __DIR__ . '/../controllers/RegisterController.php';
 require_once __DIR__ . '/../controllers/DiscoveryController.php';
 require_once __DIR__ . '/../controllers/ProfileController.php';
@@ -29,6 +25,7 @@ require_once __DIR__ . '/../controllers/SettingsController.php';
 require_once __DIR__ . '/../controllers/SecretMeetingController.php';
 
 try { Schema::ensureAll(); } catch (Throwable $e) { Logger::error('Schema: ' . $e->getMessage()); }
+try { Game::ensureTable(); } catch (Throwable $e) {}
 
 $rawInput = file_get_contents('php://input');
 if (empty($rawInput)) { http_response_code(200); echo 'OK'; exit; }
@@ -37,10 +34,7 @@ if (!$update) { http_response_code(200); exit; }
 
 $headers = function_exists('getallheaders') ? getallheaders() : [];
 $secretHeader = $headers['X-Bale-Bot-Api-Secret-Token'] ?? $headers['x-bale-bot-api-secret-token'] ?? '';
-if (!empty($secretHeader) && $secretHeader !== WEBHOOK_SECRET) {
-    Logger::security('Invalid webhook secret');
-    http_response_code(403); exit;
-}
+if (!empty($secretHeader) && $secretHeader !== WEBHOOK_SECRET) { http_response_code(403); exit; }
 
 try {
     $botActive = Database::fetch('SELECT value FROM settings WHERE `key` = "bot_active"');
@@ -56,39 +50,29 @@ try {
 $bale = new Bale();
 $webhookCallId = uniqid('wh_', true);
 
-try {
-    handleUpdate($update, $bale, $webhookCallId);
-} catch (Throwable $e) {
+try { handleUpdate($update, $bale, $webhookCallId); } catch (Throwable $e) {
     $errorId = uniqid('err_', true);
     Logger::error("[$errorId] [$webhookCallId] " . $e->getMessage(), ['file' => $e->getFile() . ':' . $e->getLine()]);
     $chatId = extractChatId($update);
-    if ($chatId) {
-        try {
-            $bale->sendMessage($chatId, "⚠️ خطایی رخ داد. /start بزنید.\nکد: $errorId", $bale->mainMenuKeyboard());
-        } catch (Throwable $e2) {}
-    }
+    if ($chatId) { try { $bale->sendMessage($chatId, "⚠️ خطایی رخ داد. /start بزنید.\nکد: $errorId", $bale->mainMenuKeyboard()); } catch (Throwable $e2) {} }
 }
-
-http_response_code(200);
-echo 'OK';
+http_response_code(200); echo 'OK';
 
 function handleUpdate(array $update, Bale $bale, string $webhookCallId): void
 {
-    $registerCtrl      = new RegisterController($bale);
-    $discoveryCtrl     = new DiscoveryController($bale);
-    $profileCtrl       = new ProfileController($bale);
-    $chatCtrl          = new ChatController($bale);
-    $settingsCtrl      = new SettingsController($bale);
+    $registerCtrl = new RegisterController($bale);
+    $discoveryCtrl = new DiscoveryController($bale);
+    $profileCtrl = new ProfileController($bale);
+    $chatCtrl = new ChatController($bale);
+    $settingsCtrl = new SettingsController($bale);
     $secretMeetingCtrl = new SecretMeetingController($bale, $chatCtrl);
 
-    // ===== CALLBACK =====
     if (isset($update['callback_query'])) {
-        $cb        = $update['callback_query'];
-        $from      = $cb['from'];
-        $data      = trim($cb['data'] ?? '');
-        $cbId      = $cb['id'] ?? '';
+        $cb = $update['callback_query'];
+        $from = $cb['from'];
+        $data = trim($cb['data'] ?? '');
+        $cbId = $cb['id'] ?? '';
         $messageId = $cb['message']['message_id'] ?? 0;
-
         if ($cbId === '' || $data === '') return;
 
         try {
@@ -96,79 +80,40 @@ function handleUpdate(array $update, Bale $bale, string $webhookCallId): void
             if (!$user) { $bale->answerCallbackQuery($cbId, 'برای شروع /start', true); return; }
             if (User::isBlocked($user['id'])) { $bale->answerCallbackQuery($cbId, '🚫 مسدودی', true); return; }
             User::touchLastSeen($user['id']);
-
-            // لاگ برای دیباگ
             Logger::info("Callback", ['user' => $user['id'], 'data' => $data]);
-
-            // روتینگ امن - هر کدوم که نشناخت بره بعدی
             $handled = false;
 
-            // 1. Discovery (like, dislike, next, report, view_liker, superlike)
-            if (!$handled && (
-                str_starts_with($data, 'like_') ||
-                str_starts_with($data, 'dislike_') ||
-                str_starts_with($data, 'next_') ||
-                str_starts_with($data, 'superlike_') ||
-                str_starts_with($data, 'super_') ||
-                str_starts_with($data, 'report_') ||
-                str_starts_with($data, 'view_liker_') ||
-                $data === 'discovery_continue' ||
-                $data === 'discovery_next'
-            )) {
+            // Game callbacks - اولویت بالا
+            if (!$handled && str_starts_with($data, 'game_')) {
+                try { $chatCtrl->handleCallback($user, $cbId, $data); $handled = true; } catch (Throwable $e) { Logger::error('Game cb failed: ' . $e->getMessage()); }
+            }
+
+            if (!$handled && (str_starts_with($data, 'like_') || str_starts_with($data, 'dislike_') || str_starts_with($data, 'next_') || str_starts_with($data, 'superlike_') || str_starts_with($data, 'super_') || str_starts_with($data, 'report_') || str_starts_with($data, 'view_liker_') || $data === 'discovery_continue' || $data === 'discovery_next')) {
                 try { $discoveryCtrl->handleCallback($user, $cbId, $data, $messageId); $handled = true; } catch (Throwable $e) { Logger::error('Discovery cb failed: ' . $e->getMessage()); }
             }
-
-            // 2. Profile
-            if (!$handled && (
-                str_starts_with($data, 'profile_') ||
-                str_starts_with($data, 'edit_') ||
-                str_starts_with($data, 'unblock_') ||
-                str_starts_with($data, 'view_liker_')
-            )) {
+            if (!$handled && (str_starts_with($data, 'profile_') || str_starts_with($data, 'edit_') || str_starts_with($data, 'unblock_') || str_starts_with($data, 'view_liker_'))) {
                 try { $profileCtrl->handleCallback($user, $cbId, $data); $handled = true; } catch (Throwable $e) { Logger::error('Profile cb failed: ' . $e->getMessage()); }
             }
-
-            // 3. Chat
             if (!$handled && (str_starts_with($data, 'chat_') || str_starts_with($data, 'sm_'))) {
                 try { $chatCtrl->handleCallback($user, $cbId, $data); $handled = true; } catch (Throwable $e) { Logger::error('Chat cb failed: ' . $e->getMessage()); }
             }
-
-            // 4. Settings / VIP / Shop
-            if (!$handled && (
-                str_starts_with($data, 'vip_') ||
-                str_starts_with($data, 'settings_') ||
-                str_starts_with($data, 'shop_') ||
-                $data === 'daily_bonus' ||
-                $data === 'noop'
-            )) {
+            if (!$handled && (str_starts_with($data, 'vip_') || str_starts_with($data, 'settings_') || str_starts_with($data, 'shop_') || $data === 'daily_bonus' || $data === 'noop')) {
                 try { $settingsCtrl->handleCallback($user, $cbId, $data); $handled = true; } catch (Throwable $e) { Logger::error('Settings cb failed: ' . $e->getMessage()); }
             }
-
-            // اگر هیچکدوم هندل نکرد
-            if (!$handled) {
-                $bale->answerCallbackQuery($cbId);
-            }
-
+            if (!$handled) $bale->answerCallbackQuery($cbId);
         } catch (Throwable $e) {
-            Logger::error('Callback outer failed: ' . $e->getMessage(), ['data' => $data, 'trace' => substr($e->getTraceAsString(), 0, 1000)]);
+            Logger::error('Callback outer failed: ' . $e->getMessage());
             try { $bale->answerCallbackQuery($cbId, '✅'); } catch (Throwable $e2) {}
-            try {
-                if (isset($user)) {
-                    $bale->sendMessage((int) $user['bale_id'], 'از منو انتخاب کنید:', $bale->mainMenuKeyboard());
-                }
-            } catch (Throwable $e2) {}
         }
         return;
     }
 
-    // ===== MESSAGE =====
     if (!isset($update['message'])) return;
-
     $message = $update['message'];
-    $from    = $message['from'];
-    $chatId  = (int) $from['id'];
-    $text    = trim($message['text'] ?? '');
-    $photo   = $message['photo'] ?? null;
+    $from = $message['from'];
+    $chatId = (int) $from['id'];
+    $text = trim($message['text'] ?? '');
+    $photo = $message['photo'] ?? null;
     $caption = trim($message['caption'] ?? '');
     if ($photo && $caption) $text = $caption;
 
@@ -181,77 +126,32 @@ function handleUpdate(array $update, Bale $bale, string $webhookCallId): void
         $registerCtrl->start($user, $from, $refCode);
         return;
     }
-
-    if (!$user) {
-        $bale->sendMessage($chatId, "برای شروع /start بزنید");
-        return;
-    }
-
-    if (User::isBlocked($user['id'])) {
-        $bale->sendMessage($chatId, '🚫 حسابت مسدوده');
-        return;
-    }
-
+    if (!$user) { $bale->sendMessage($chatId, "برای شروع /start بزنید"); return; }
+    if (User::isBlocked($user['id'])) { $bale->sendMessage($chatId, '🚫 حسابت مسدوده'); return; }
     User::touchLastSeen($user['id']);
     $step = $user['step'] ?? 'idle';
 
     if ($text === '/cancel') {
-        User::updateStep($user['id'], 'idle');
-        User::updateUserStatus($user['id'], 'idle');
+        User::updateStep($user['id'], 'idle'); User::updateUserStatus($user['id'], 'idle');
         try { SecretMeetingQueue::removeFromQueue($user['id']); } catch (Throwable $e) {}
-        $bale->sendMessage($chatId, '✅ لغو شد', $bale->mainMenuKeyboard());
+        $bale->sendMessage($chatId, '✅ لغو شد', $bale->mainMenuKeyboard()); return;
+    }
+    if ($text === '/daily' || $text === '🎁 جایزه روزانه') { $result = User::claimDailyBonus($user['id']); $bale->sendMessage($chatId, $result['message'], $bale->mainMenuKeyboard()); return; }
+    if ($text === '/coins' || $text === '💰 ثروت من') { $balance = Coin::getBalance($user['id']); $bale->sendMessage($chatId, "💰 موجودی: {$balance} سکه", $bale->mainMenuKeyboard()); return; }
+    if ($text === '/invite' || $text === '👥 دعوت دوستان') { $link = User::getReferralLink($user['id']); $stats = User::getReferralStats($user['id']); $bale->sendMessage($chatId, "👥 دعوت:\n🔗 $link\n\n👥 {$stats['count']} نفر | 💰 {$stats['earned']} سکه", $bale->mainMenuKeyboard()); return; }
+    if ($text === '/top' || $text === '🏆 برترین‌ها') { $top = Coin::getTopUsers(5); $msg = "🏆 برترین‌ها:\n\n"; foreach ($top as $i => $u) { $name = $u['name'] ?? 'کاربر'; $msg .= ($i+1) . ". $name - {$u['balance']} سکه\n"; } $bale->sendMessage($chatId, $msg, $bale->mainMenuKeyboard()); return; }
+    if ($text === '/help') { $bale->sendMessage($chatId, "📖 راهنما:\n🕶 ملاقات مخفیانه\n❤️ پیدا کردن دوست\n💬 گفتگوها\n🎮 بازی در چت\n🎁 /daily\n👥 /invite\n/help", $bale->mainMenuKeyboard()); return; }
+
+    if ($text === '🎮 بازی') {
+        $chatCtrl->showGameMenu($user);
         return;
     }
 
-    if ($text === '/daily' || $text === '🎁 جایزه روزانه') {
-        $result = User::claimDailyBonus($user['id']);
-        $bale->sendMessage($chatId, $result['message'], $bale->mainMenuKeyboard());
-        return;
-    }
-
-    if ($text === '/coins' || $text === '💰 ثروت من') {
-        $balance = Coin::getBalance($user['id']);
-        $bale->sendMessage($chatId, "💰 موجودی: {$balance} سکه", $bale->mainMenuKeyboard());
-        return;
-    }
-
-    if ($text === '/invite' || $text === '👥 دعوت دوستان') {
-        $link = User::getReferralLink($user['id']);
-        $stats = User::getReferralStats($user['id']);
-        $bale->sendMessage($chatId, "👥 دعوت:\n🔗 $link\n\n👥 {$stats['count']} نفر | 💰 {$stats['earned']} سکه", $bale->mainMenuKeyboard());
-        return;
-    }
-
-    if ($text === '/top' || $text === '🏆 برترین‌ها') {
-        $top = Coin::getTopUsers(5);
-        $msg = "🏆 برترین‌ها:\n\n";
-        foreach ($top as $i => $u) { $name = $u['name'] ?? 'کاربر'; $msg .= ($i+1) . ". $name - {$u['balance']} سکه\n"; }
-        $bale->sendMessage($chatId, $msg, $bale->mainMenuKeyboard());
-        return;
-    }
-
-    if ($text === '/help') {
-        $bale->sendMessage($chatId, "📖 راهنما:\n🕶 ملاقات مخفیانه\n❤️ پیدا کردن دوست\n💬 گفتگوها\n🎁 /daily\n👥 /invite\n💰 /coins\n/help", $bale->mainMenuKeyboard());
-        return;
-    }
-
-    if ($step === 'secret_meeting' && ($text === '🔎 جستجوی پیشرفته' || isSecretMeetingCommand($text))) {
-        $secretMeetingCtrl->handleMenu($user, $text); return;
-    }
+    if ($step === 'secret_meeting' && ($text === '🔎 جستجوی پیشرفته' || isSecretMeetingCommand($text))) { $secretMeetingCtrl->handleMenu($user, $text); return; }
     if ($step === 'secret_meeting_gender') { $secretMeetingCtrl->handleGenderSelection($user, $text); return; }
     if ($step === 'secret_meeting_province') { $secretMeetingCtrl->handleProvinceSelection($user, $text); return; }
-
-    if (isMainMenuCommand($text)) {
-        if ($step !== 'idle' && $step !== 'chatting') User::updateStep($user['id'], 'idle');
-        handleMainMenuCommand($text, $user, $bale, $discoveryCtrl, $profileCtrl, $chatCtrl, $settingsCtrl, $secretMeetingCtrl);
-        return;
-    }
-
-    if (isSecretMeetingCommand($text)) {
-        if ($step === 'chatting') User::updateStep($user['id'], 'idle');
-        $secretMeetingCtrl->handleMenu($user, $text); return;
-    }
-
+    if (isMainMenuCommand($text)) { if ($step !== 'idle' && $step !== 'chatting') User::updateStep($user['id'], 'idle'); handleMainMenuCommand($text, $user, $bale, $discoveryCtrl, $profileCtrl, $chatCtrl, $settingsCtrl, $secretMeetingCtrl); return; }
+    if (isSecretMeetingCommand($text)) { if ($step === 'chatting') User::updateStep($user['id'], 'idle'); $secretMeetingCtrl->handleMenu($user, $text); return; }
     if (str_starts_with($step, 'register_')) { $registerCtrl->handle($user, $text, $photo); return; }
     if (str_starts_with($step, 'editing_') || $step === 'update_photo' || $step === 'edit_field') { $profileCtrl->handleEdit($user, $text, $photo); return; }
 
@@ -266,22 +166,15 @@ function handleUpdate(array $update, Bale $bale, string $webhookCallId): void
         if ($photo || $text !== '') { $chatCtrl->sendChatMessage($user, $text, $photo); return; }
         $bale->sendMessage($chatId, 'پیام بنویس'); return;
     }
-
     if (in_array($step, ['report_id', 'report_reason', 'report_user'])) { $settingsCtrl->handleReport($user, $text); return; }
-
     $profile = Profile::findByUserId($user['id']);
     if (!$profile) { $registerCtrl->start($user, $from); return; }
-
     $bale->sendMessage($chatId, 'از منو انتخاب کن:', $bale->mainMenuKeyboard());
 }
 
 function isMainMenuCommand(string $text): bool { return in_array($text, getMainMenuCommands(), true); }
 function isSecretMeetingCommand(string $text): bool { foreach (getSecretMeetingCommands() as $cmd) if (str_starts_with($text, $cmd)) return true; return false; }
-function getMainMenuCommands(): array {
-    return [
-        '🕶 ملاقات مخفیانه','🔎 جستجوی پیشرفته','❤️ پیدا کردن دوست','💬 گفتگوهای من','📁 پرونده من','💰 ثروت من','🎁 جایزه روزانه','👥 دعوت دوستان','🏆 برترین‌ها','💎 خرید اشتراک مافیایی','💎 خرید اشتراک','💎 خرید VIP','⚙ تنظیمات','📖 دفترچه راهنما','⚖ قوانین مافیا','🎩 پشتیبانی','🕴 کاربران مافیایی','🌃 اکسپلور','🏰 اتاق مافیایی من','👤 پروفایل من','⭐ عضویت ویژه','🚨 گزارش کاربر','/daily','/coins','/invite','/top','/help','/start',
-    ];
-}
+function getMainMenuCommands(): array { return ['🕶 ملاقات مخفیانه','🔎 جستجوی پیشرفته','❤️ پیدا کردن دوست','💬 گفتگوهای من','📁 پرونده من','💰 ثروت من','🎁 جایزه روزانه','👥 دعوت دوستان','🏆 برترین‌ها','💎 خرید اشتراک مافیایی','💎 خرید اشتراک','💎 خرید VIP','⚙ تنظیمات','📖 دفترچه راهنما','⚖ قوانین مافیا','🎩 پشتیبانی','🕴 کاربران مافیایی','🌃 اکسپلور','🏰 اتاق مافیایی من','👤 پروفایل من','⭐ عضویت ویژه','🚨 گزارش کاربر','/daily','/coins','/invite','/top','/help','/start',]; }
 function getSecretMeetingCommands(): array { return ['🎲 جستجوی شانسی','👨 جستجوی پسر','👩 جستجوی دختر','🗺 جستجوی بر اساس استان','🔙 بازگشت',]; }
 function handleMainMenuCommand(string $text, array $user, Bale $bale, DiscoveryController $discoveryCtrl, ProfileController $profileCtrl, ChatController $chatCtrl, SettingsController $settingsCtrl, SecretMeetingController $secretMeetingCtrl): void {
     $chatId = (int) $user['bale_id'];
@@ -295,7 +188,7 @@ function handleMainMenuCommand(string $text, array $user, Bale $bale, DiscoveryC
         case '🎁 جایزه روزانه': $result = User::claimDailyBonus($user['id']); $bale->sendMessage($chatId, $result['message'], $bale->mainMenuKeyboard()); break;
         case '👥 دعوت دوستان': $link = User::getReferralLink($user['id']); $stats = User::getReferralStats($user['id']); $bale->sendMessage($chatId, "👥 $link\n👥 {$stats['count']} | 💰 {$stats['earned']}", $bale->mainMenuKeyboard()); break;
         case '🏆 برترین‌ها': $top = Coin::getTopUsers(5); $msg = "🏆 برترین‌ها:\n\n"; foreach ($top as $i => $u) { $name = $u['name'] ?? 'کاربر'; $msg .= ($i+1) . ". $name - {$u['balance']}\n"; } $bale->sendMessage($chatId, $msg, $bale->mainMenuKeyboard()); break;
-        case '📖 دفترچه راهنما': $bale->sendMessage($chatId, "📖 راهنما: /help", $bale->mainMenuKeyboard()); break;
+        case '📖 دفترچه راهنما': $bale->sendMessage($chatId, "📖 راهنما: /help\n🎮 بازی: در چت دکمه 🎮 بازی", $bale->mainMenuKeyboard()); break;
         case '⚖ قوانین مافیا': $bale->sendMessage($chatId, "⚖ قوانین: احترام، بدون اسپم", $bale->mainMenuKeyboard()); break;
         case '❤️ پیدا کردن دوست': $discoveryCtrl->showNext($user); break;
         case '💬 گفتگوهای من': $chatCtrl->showMatches($user); break;
@@ -304,7 +197,11 @@ function handleMainMenuCommand(string $text, array $user, Bale $bale, DiscoveryC
     }
 }
 function extractChatId(array $update): ?int { if (isset($update['message']['from']['id'])) return (int) $update['message']['from']['id']; if (isset($update['callback_query']['from']['id'])) return (int) $update['callback_query']['from']['id']; return null; }
-function isSecretMeetingChatButton(string $text): bool { return in_array($text, ['👤 مشاهده پرونده مخاطب','🎁 هدیه دادن','❌ پایان گفت‌وگو','🗑 حذف پیام‌ها','🚨 گزارش کاربر'], true); }
+function isSecretMeetingChatButton(string $text): bool { 
+    return in_array($text, [
+        '👤 مشاهده پرونده مخاطب','🎁 هدیه دادن','❌ پایان گفت‌وگو','🗑 حذف پیام‌ها','🚨 گزارش کاربر','🎮 بازی'
+    ], true); 
+}
 function resolveSecretMeetingChatButton(array $user, string $text): ?string {
     $partnerId = 0; $roomId = 0;
     if (($user['current_status'] ?? 'idle') === 'in_secret_meeting' && !empty($user['current_secret_meeting_room_id'])) {
@@ -318,6 +215,7 @@ function resolveSecretMeetingChatButton(array $user, string $text): ?string {
         '🚨 گزارش کاربر' => 'sm_report_user_' . $partnerId,
         '🗑 حذف پیام‌ها' => $roomId > 0 ? 'sm_delete_messages_' . $roomId : null,
         '❌ پایان گفت‌وگو' => $roomId > 0 ? 'sm_end_chat_' . $roomId : null,
+        '🎮 بازی' => 'game_menu_' . $roomId,
         default => null,
     };
 }
