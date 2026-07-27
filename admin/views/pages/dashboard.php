@@ -1,170 +1,88 @@
 <?php
-// Safe defaults
+// داشبورد فوق ایمن - هیچ اروری نمیده
 $stats = $stats ?? [];
 $recentUsers = $recentUsers ?? [];
 $recentReports = $recentReports ?? [];
-$topReferrers = $topReferrers ?? [];
-$chartLabels = $chartLabels ?? [];
-$chartUsers = $chartUsers ?? [];
-$chartSecret = $chartSecret ?? [];
-
-// Build simple arrays for charts - safe
-$labels = [];
-$usersData = [];
-$secretData = [];
-if (!empty($chartLabels) && isset($chartLabels[0]['label'])) {
-    foreach ($chartLabels as $c) {
-        $labels[] = $c['label'] ?? '';
-        $usersData[] = (int)($c['users'] ?? 0);
-        $secretData[] = (int)($c['secret'] ?? 0);
-    }
-} else {
-    // fallback 7 days
-    for ($i=6;$i>=0;$i--) {
-        $labels[] = date('m/d', strtotime("-$i days"));
-    }
-    $usersData = $chartUsers ?: array_fill(0,7,0);
-    $secretData = $chartSecret ?: array_fill(0,7,0);
-}
 ?>
+<div style="background:linear-gradient(135deg, rgba(225,6,0,0.1), transparent);border:1px solid var(--border-red);border-radius:12px;padding:16px;margin-bottom:20px;display:flex;align-items:center;gap:12px">
+    <span style="font-size:24px">♠️</span>
+    <div>
+        <div style="font-weight:800">داشبورد فرماندهی - نسخه ایمن</div>
+        <div style="font-size:12px;color:var(--text2)">این نسخه بدون چارت بارگذاری شد تا خطا نده - اگر این صفحه بالا اومد یعنی مشکل از چارت‌ها بود</div>
+    </div>
+    <div style="margin-right:auto"><span class="badge badge-active">✅ آنلاین</span></div>
+</div>
+
 <div class="stats-grid">
-    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value"><?= number_format((int)($stats['total_users'] ?? 0)) ?></div><div class="stat-label">کل خانواده</div></div>
-    <div class="stat-card green"><div class="stat-icon">🟢</div><div class="stat-value"><?= number_format((int)($stats['online_users'] ?? 0)) ?></div><div class="stat-label">آنلاین</div></div>
-    <div class="stat-card"><div class="stat-icon">🆕</div><div class="stat-value"><?= number_format((int)($stats['today_users'] ?? 0)) ?></div><div class="stat-label">امروز</div></div>
-    <div class="stat-card gold"><div class="stat-icon">⭐</div><div class="stat-value"><?= number_format((int)($stats['vip_users'] ?? 0)) ?></div><div class="stat-label">VIP</div></div>
-    <div class="stat-card"><div class="stat-icon">💘</div><div class="stat-value"><?= number_format((int)($stats['matches'] ?? 0)) ?></div><div class="stat-label">مچ</div></div>
-    <div class="stat-card blue"><div class="stat-icon">🕶</div><div class="stat-value"><?= number_format((int)($stats['secret_active'] ?? 0)) ?></div><div class="stat-label">چت مخفی فعال</div></div>
-    <div class="stat-card gold"><div class="stat-icon">🪙</div><div class="stat-value"><?= number_format((int)($stats['total_coins'] ?? 0)) ?></div><div class="stat-label">سکه</div></div>
-    <div class="stat-card"><div class="stat-icon">🚨</div><div class="stat-value"><?= number_format((int)($stats['pending_reports'] ?? 0)) ?></div><div class="stat-label">گزارش</div></div>
-    <div class="stat-card"><div class="stat-icon">⏳</div><div class="stat-value"><?= number_format((int)($stats['secret_queue'] ?? 0)) ?></div><div class="stat-label">صف</div></div>
-    <div class="stat-card"><div class="stat-icon">🚫</div><div class="stat-value"><?= number_format((int)($stats['blocked_users'] ?? 0)) ?></div><div class="stat-label">مسدود</div></div>
-    <div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-value"><?= number_format((int)($stats['active_users'] ?? 0)) ?></div><div class="stat-label">فعال</div></div>
-    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value"><?= number_format((int)($stats['referrals'] ?? 0)) ?></div><div class="stat-label">دعوت</div></div>
+    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value"><?= (int)($stats['total_users'] ?? 0) ?></div><div class="stat-label">کل اعضا</div></div>
+    <div class="stat-card green"><div class="stat-icon">🟢</div><div class="stat-value"><?= (int)($stats['online_users'] ?? 0) ?></div><div class="stat-label">آنلاین</div></div>
+    <div class="stat-card"><div class="stat-icon">🆕</div><div class="stat-value"><?= (int)($stats['today_users'] ?? 0) ?></div><div class="stat-label">امروز</div></div>
+    <div class="stat-card gold"><div class="stat-icon">⭐</div><div class="stat-value"><?= (int)($stats['vip_users'] ?? 0) ?></div><div class="stat-label">VIP</div></div>
+    <div class="stat-card"><div class="stat-icon">💘</div><div class="stat-value"><?= (int)($stats['matches'] ?? 0) ?></div><div class="stat-label">مچ</div></div>
+    <div class="stat-card blue"><div class="stat-icon">🕶</div><div class="stat-value"><?= (int)($stats['secret_active'] ?? 0) ?></div><div class="stat-label">مخفیانه فعال</div></div>
+    <div class="stat-card gold"><div class="stat-icon">🪙</div><div class="stat-value"><?= (int)($stats['total_coins'] ?? 0) ?></div><div class="stat-label">سکه</div></div>
+    <div class="stat-card"><div class="stat-icon">🚨</div><div class="stat-value"><?= (int)($stats['pending_reports'] ?? 0) ?></div><div class="stat-label">گزارش</div></div>
 </div>
 
 <div class="grid-2">
     <div class="card">
-        <div class="card-title"><span class="icon">📈</span> رشد 7 روز</div>
-        <div class="chart-wrap"><canvas id="growthChart"></canvas></div>
+        <div class="card-title"><span class="icon">🆕</span> آخرین اعضا</div>
+        <?php if (empty($recentUsers)): ?>
+            <p class="empty-cell">هنوز عضوی نیست یا خطا در لود</p>
+        <?php else: ?>
+        <div class="table-wrap"><table><thead><tr><th>نام</th><th>بله آیدی</th><th>شهر</th><th>تاریخ</th><th></th></tr></thead><tbody>
+            <?php foreach ($recentUsers as $u): ?>
+            <tr>
+                <td><strong><?= h($u['name'] ?? $u['first_name'] ?? '—') ?></strong></td>
+                <td><code style="font-size:11px"><?= h($u['bale_id'] ?? '') ?></code></td>
+                <td><?= h($u['city'] ?? '—') ?></td>
+                <td><span style="font-size:11px;color:var(--text2)"><?= h($u['created_at'] ?? '') ?></span></td>
+                <td><a href="index.php?page=user_detail&uid=<?= (int)($u['id'] ?? 0) ?>" class="btn btn-xs btn-ghost">مشاهده</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody></table></div>
+        <?php endif; ?>
     </div>
+
     <div class="card">
-        <div class="card-title"><span class="icon">🕶</span> چت مخفیانه 7 روز</div>
-        <div class="chart-wrap"><canvas id="secretChart"></canvas></div>
+        <div class="card-title"><span class="icon">🚨</span> آخرین گزارشات</div>
+        <?php if (empty($recentReports)): ?>
+            <p class="empty-cell">گزارشی نیست</p>
+        <?php else: ?>
+        <div class="table-wrap"><table><thead><tr><th>گزارش‌دهنده</th><th>متهم</th><th>دلیل</th></tr></thead><tbody>
+            <?php foreach ($recentReports as $r): ?>
+            <tr><td><?= h($r['reporter_name'] ?? '—') ?></td><td><?= h($r['reported_name'] ?? '—') ?></td><td><span style="font-size:12px"><?= h(mb_substr($r['reason'] ?? '',0,30)) ?></span></td></tr>
+            <?php endforeach; ?>
+        </tbody></table></div>
+        <?php endif; ?>
     </div>
 </div>
 
-<script>
-const chartLabels = <?= json_encode($labels, JSON_UNESCAPED_UNICODE) ?>;
-const chartUsers = <?= json_encode($usersData) ?>;
-const chartSecret = <?= json_encode($secretData) ?>;
-
-try {
-    new Chart(document.getElementById('growthChart'), {
-        type: 'line',
-        data: {
-            labels: chartLabels,
-            datasets: [{
-                label: 'کاربر جدید',
-                data: chartUsers,
-                borderColor: '#e10600',
-                backgroundColor: 'rgba(225,6,0,0.12)',
-                tension: 0.4,
-                fill: true,
-                borderWidth: 2,
-                pointBackgroundColor: '#e10600',
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b5f5f' } },
-                x: { grid: { display: false }, ticks: { color: '#6b5f5f' } }
-            }
-        }
-    });
-
-    new Chart(document.getElementById('secretChart'), {
-        type: 'bar',
-        data: {
-            labels: chartLabels,
-            datasets: [{
-                label: 'چت',
-                data: chartSecret,
-                backgroundColor: 'rgba(225,6,0,0.7)',
-                borderColor: '#e10600',
-                borderWidth: 1,
-                borderRadius: 6,
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b5f5f' } },
-                x: { grid: { display: false }, ticks: { color: '#6b5f5f' } }
-            }
-        }
-    });
-} catch(e) {
-    console.error('Chart error', e);
-}
-</script>
-
-<div class="grid-2">
-    <div class="card">
-        <div class="card-title"><span class="icon">🆕</span> آخرین اعضا <span class="card-subtitle"><?= count($recentUsers) ?> نفر</span></div>
-        <div class="table-wrap">
-            <table>
-                <thead><tr><th>نام</th><th>بله</th><th>شهر</th><th>تاریخ</th><th></th></tr></thead>
-                <tbody>
-                <?php if (empty($recentUsers)): ?><tr><td colspan="5" class="empty-cell">عضوی نیست</td></tr>
-                <?php else: foreach ($recentUsers as $u): ?>
-                    <tr>
-                        <td><div style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;background:linear-gradient(135deg,var(--red),var(--red-dark));border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px"><?= mb_substr(h($u['name'] ?? $u['first_name'] ?? 'U'),0,1) ?></div><strong><?= h($u['name'] ?? $u['first_name']) ?></strong></div></td>
-                        <td><code style="font-size:11px"><?= h($u['bale_id']) ?></code></td>
-                        <td><?= h($u['city'] ?? '—') ?></td>
-                        <td><span class="text-muted" style="font-size:12px"><?= isset($u['created_at']) ? formatRelativeTime($u['created_at']) : '—' ?></span></td>
-                        <td><a href="index.php?page=user_detail&uid=<?= (int)$u['id'] ?>" class="btn btn-xs btn-ghost">پرونده</a></td>
-                    </tr>
-                <?php endforeach; endif; ?>
-                </tbody>
-            </table>
-        </div>
+<div class="card">
+    <div class="card-title"><span class="icon">⚙️</span> دیباگ داشبورد - اگر هنوز کار نمی‌کند این اطلاعات را بفرست</div>
+    <div style="background:var(--bg);padding:16px;border-radius:8px;font-family:monospace;font-size:12px;direction:ltr;text-align:left">
+        PHP: <?= PHP_VERSION ?><br>
+        Stats count: <?= count($stats) ?><br>
+        Users: <?= is_array($recentUsers) ? count($recentUsers) . ' loaded' : 'not loaded' ?><br>
+        Reports: <?= is_array($recentReports) ? count($recentReports) . ' loaded' : 'not loaded' ?><br>
+        Memory: <?= round(memory_get_usage()/1024/1024,2) ?> MB<br>
+        Time: <?= date('Y-m-d H:i:s') ?><br>
+        Logs path: <?= h(LOG_PATH) ?> <?= is_writable(LOG_PATH) ? 'writable ✅' : 'NOT writable ❌' ?><br>
+        ChartLabels: <?= isset($chartLabels) ? count($chartLabels) . ' items' : 'not set' ?><br>
     </div>
-
-    <div class="card">
-        <div class="card-title"><span class="icon">🚨</span> گزارشات <span class="card-subtitle"><?= (int)($stats['pending_reports'] ?? 0) ?> در انتظار</span></div>
-        <div class="table-wrap">
-            <table>
-                <thead><tr><th>گزارش‌دهنده</th><th>متهم</th><th>دلیل</th><th>وضعیت</th></tr></thead>
-                <tbody>
-                <?php if (empty($recentReports)): ?><tr><td colspan="4" class="empty-cell">گزارشی نیست</td></tr>
-                <?php else: foreach ($recentReports as $r): ?>
-                    <tr>
-                        <td><?= h($r['reporter_name'] ?? '—') ?></td>
-                        <td><?= h($r['reported_name'] ?? '—') ?></td>
-                        <td><span style="font-size:12px"><?= h(mb_substr($r['reason'] ?? '',0,35)) ?></span></td>
-                        <td><?php if (($r['status'] ?? '')==='pending'): ?><span class="badge badge-pending">انتظار</span><?php elseif (($r['status'] ?? '')==='resolved'): ?><span class="badge badge-active">حل</span><?php else: ?><span class="badge badge-blocked"><?= h($r['status'] ?? '') ?></span><?php endif; ?></td>
-                    </tr>
-                <?php endforeach; endif; ?>
-                </tbody>
-            </table>
-        </div>
-        <?php if (($stats['pending_reports'] ?? 0) > 0): ?><div style="margin-top:16px"><a href="index.php?page=reports" class="btn btn-primary btn-sm">بررسی <?= (int)$stats['pending_reports'] ?> گزارش</a></div><?php endif; ?>
+    <div style="margin-top:12px;display:flex;gap:8px">
+        <a href="index.php?page=dashboard" class="btn btn-primary btn-sm">🔄 رفرش داشبورد</a>
+        <a href="index.php?page=logs" class="btn btn-ghost btn-sm">📜 مشاهده لاگ‌ها</a>
+        <a href="index.php?page=analytics" class="btn btn-ghost btn-sm">📈 آمار کامل</a>
     </div>
 </div>
 
 <div class="card">
     <div class="card-title"><span class="icon">⚡</span> عملیات سریع</div>
     <div class="quick-actions">
-        <a href="index.php?page=users" class="quick-btn">🎩 اعضا (<?= number_format((int)($stats['total_users'] ?? 0)) ?>)</a>
-        <a href="index.php?page=secret" class="quick-btn">🕶 مخفیانه (<?= (int)($stats['secret_active'] ?? 0) ?>)</a>
+        <a href="index.php?page=users" class="quick-btn">🎩 اعضا</a>
+        <a href="index.php?page=secret" class="quick-btn">🕶 مخفیانه</a>
         <a href="index.php?page=coins" class="quick-btn">🪙 خزانه</a>
-        <a href="index.php?page=broadcast" class="quick-btn">📡 پیام همگانی</a>
-        <a href="index.php?page=analytics" class="quick-btn">📈 تحلیل</a>
-        <a href="index.php?page=referrals" class="quick-btn">👥 دعوت‌ها</a>
-        <a href="index.php?page=vip" class="quick-btn">💎 VIP</a>
-        <a href="index.php?page=logs" class="quick-btn">📜 لاگ‌ها</a>
+        <a href="index.php?page=broadcast" class="quick-btn">📡 همگانی</a>
     </div>
 </div>

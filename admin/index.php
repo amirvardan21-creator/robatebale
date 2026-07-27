@@ -1,5 +1,8 @@
 <?php
 session_start();
+ini_set('display_errors', 0);
+error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED);
+
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../classes/Database.php';
 require_once __DIR__ . '/../classes/Logger.php';
@@ -16,6 +19,7 @@ require_once __DIR__ . '/includes/helpers.php';
 
 function adminAuth(): void { if (empty($_SESSION['admin_logged_in'])) { header('Location: index.php'); exit; } }
 function safeCount(string $sql, array $params = []): int { try { $r = Database::fetch($sql, $params); return (int)($r['cnt'] ?? 0); } catch (Throwable $e) { return 0; } }
+function safeFetchAll(string $sql, array $params = []): array { try { return Database::fetchAll($sql, $params); } catch (Throwable $e) { return []; } }
 
 $error = '';
 $page  = $_GET['page'] ?? $_POST['page'] ?? 'login';
@@ -123,9 +127,9 @@ switch ($page) {
             'secret_queue'    => $secretQueueCount,
             'referrals'       => safeCount('SELECT COUNT(*) AS cnt FROM referrals'),
         ];
-        try { $recentUsers = Database::fetchAll('SELECT u.*, p.name, p.city, p.age, p.gender FROM users u LEFT JOIN profiles p ON u.id = p.user_id ORDER BY u.created_at DESC LIMIT 8'); } catch (Throwable $e) { $recentUsers = []; }
-        try { $recentReports = Database::fetchAll('SELECT r.*, p1.name AS reporter_name, p2.name AS reported_name FROM reports r LEFT JOIN profiles p1 ON p1.user_id = r.reporter_id LEFT JOIN profiles p2 ON p2.user_id = r.reported_id ORDER BY r.created_at DESC LIMIT 6'); } catch (Throwable $e) { $recentReports = []; }
-        try { $topReferrers = Database::fetchAll('SELECT u.id, p.name, COUNT(r.id) as cnt FROM referrals r JOIN users u ON r.referrer_id=u.id LEFT JOIN profiles p ON p.user_id=u.id GROUP BY r.referrer_id ORDER BY cnt DESC LIMIT 5'); } catch (Throwable $e) { $topReferrers = []; }
+        $recentUsers = safeFetchAll('SELECT u.*, p.name, p.city, p.age, p.gender FROM users u LEFT JOIN profiles p ON u.id = p.user_id ORDER BY u.created_at DESC LIMIT 8');
+        $recentReports = safeFetchAll('SELECT r.*, p1.name AS reporter_name, p2.name AS reported_name FROM reports r LEFT JOIN profiles p1 ON p1.user_id = r.reporter_id LEFT JOIN profiles p2 ON p2.user_id = r.reported_id ORDER BY r.created_at DESC LIMIT 6');
+        $topReferrers = safeFetchAll('SELECT u.id, p.name, COUNT(r.id) as cnt FROM referrals r JOIN users u ON r.referrer_id=u.id LEFT JOIN profiles p ON p.user_id=u.id GROUP BY r.referrer_id ORDER BY cnt DESC LIMIT 5');
         for ($i=6;$i>=0;$i--) {
             $date = date('Y-m-d', strtotime("-$i days"));
             $chartLabels[] = date('m/d', strtotime($date));
@@ -133,48 +137,42 @@ switch ($page) {
             $chartSecret[] = safeCount('SELECT COUNT(*) as cnt FROM secret_meeting_rooms WHERE DATE(created_at)=?', [$date]);
         }
         break;
-
     case 'users':
         $searchQuery = trim($_GET['q'] ?? '');
         $filter = $_GET['filter'] ?? 'all';
         $currentPage = max(1, (int) ($_GET['p'] ?? 1));
         $perPage = 20; $offset = ($currentPage - 1) * $perPage;
-        try {
-            if ($searchQuery) {
-                $users = User::search($searchQuery);
-                $totalUsers = count($users);
-                $users = array_slice($users, $offset, $perPage);
+        if ($searchQuery) {
+            $users = User::search($searchQuery);
+            $totalUsers = count($users);
+            $users = array_slice($users, $offset, $perPage);
+        } else {
+            if ($filter === 'online') {
+                $users = safeFetchAll('SELECT u.*, p.name, p.age, p.city FROM users u LEFT JOIN profiles p ON u.id=p.user_id WHERE u.last_seen_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE) AND u.is_blocked=0 ORDER BY u.last_seen_at DESC LIMIT ? OFFSET ?', [$perPage, $offset]);
+                $totalUsers = safeCount('SELECT COUNT(*) as cnt FROM users WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)');
+            } elseif ($filter === 'vip') {
+                $users = safeFetchAll('SELECT u.*, p.name, p.age, p.city FROM users u JOIN vip_users v ON v.user_id=u.id LEFT JOIN profiles p ON p.user_id=u.id WHERE v.is_active=1 AND v.expires_at > NOW() ORDER BY v.expires_at DESC LIMIT ? OFFSET ?', [$perPage, $offset]);
+                $totalUsers = safeCount('SELECT COUNT(*) as cnt FROM vip_users WHERE is_active=1 AND expires_at > NOW()');
+            } elseif ($filter === 'blocked') {
+                $users = safeFetchAll('SELECT u.*, p.name, p.age, p.city FROM users u LEFT JOIN profiles p ON u.id=p.user_id WHERE u.is_blocked=1 ORDER BY u.created_at DESC LIMIT ? OFFSET ?', [$perPage, $offset]);
+                $totalUsers = safeCount('SELECT COUNT(*) as cnt FROM users WHERE is_blocked=1');
             } else {
-                if ($filter === 'online') {
-                    $users = Database::fetchAll('SELECT u.*, p.name, p.age, p.city FROM users u LEFT JOIN profiles p ON u.id=p.user_id WHERE u.last_seen_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE) AND u.is_blocked=0 ORDER BY u.last_seen_at DESC LIMIT ? OFFSET ?', [$perPage, $offset]);
-                    $totalUsers = safeCount('SELECT COUNT(*) as cnt FROM users WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)');
-                } elseif ($filter === 'vip') {
-                    $users = Database::fetchAll('SELECT u.*, p.name, p.age, p.city FROM users u JOIN vip_users v ON v.user_id=u.id LEFT JOIN profiles p ON p.user_id=u.id WHERE v.is_active=1 AND v.expires_at > NOW() ORDER BY v.expires_at DESC LIMIT ? OFFSET ?', [$perPage, $offset]);
-                    $totalUsers = safeCount('SELECT COUNT(*) as cnt FROM vip_users WHERE is_active=1 AND expires_at > NOW()');
-                } elseif ($filter === 'blocked') {
-                    $users = Database::fetchAll('SELECT u.*, p.name, p.age, p.city FROM users u LEFT JOIN profiles p ON u.id=p.user_id WHERE u.is_blocked=1 ORDER BY u.created_at DESC LIMIT ? OFFSET ?', [$perPage, $offset]);
-                    $totalUsers = safeCount('SELECT COUNT(*) as cnt FROM users WHERE is_blocked=1');
-                } else {
-                    $totalUsers = User::count();
-                    $users = User::getAll($perPage, $offset);
-                }
+                try { $totalUsers = User::count(); $users = User::getAll($perPage, $offset); } catch (Throwable $e) { $totalUsers = 0; $users = []; }
             }
-        } catch (Throwable $e) { $users = []; $totalUsers = 0; }
+        }
         foreach ($users as &$u) { try { $u['coins'] = safeCoinBalance((int) $u['id']); $u['is_vip'] = Vip::isVip((int) $u['id']); $u['is_online'] = isUserOnline($u['last_seen_at'] ?? null); } catch (Throwable $e) { $u['coins']=0; $u['is_vip']=false; } }
         unset($u);
         $totalPages = max(1, (int) ceil($totalUsers / $perPage));
         break;
-
     case 'user_detail':
         $uid = (int) ($_GET['uid'] ?? 0);
         try { $userDetail = Database::fetch('SELECT u.*, p.id AS profile_id, p.name, p.age, p.gender, p.city, p.bio, p.interests, p.looking_for, p.is_visible, p.photo_file_id, p.total_views, p.total_likes, (SELECT COUNT(*) FROM matches m WHERE (m.user1_id = u.id OR m.user2_id = u.id) AND m.is_active = 1) AS match_count FROM users u LEFT JOIN profiles p ON p.user_id = u.id WHERE u.id = ?', [$uid]); } catch (Throwable $e) { $userDetail = null; }
         if ($userDetail) {
-            try { $userTransactions = Database::fetchAll('SELECT * FROM coin_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 10', [$uid]); } catch (Throwable $e) {}
-            try { $userReferrals = Database::fetchAll('SELECT r.*, p.name FROM referrals r LEFT JOIN profiles p ON p.user_id=r.referred_id WHERE r.referrer_id=? ORDER BY r.created_at DESC LIMIT 10', [$uid]); } catch (Throwable $e) {}
-            try { $userSecretRooms = Database::fetchAll('SELECT * FROM secret_meeting_rooms WHERE user1_id=? OR user2_id=? ORDER BY created_at DESC LIMIT 5', [$uid,$uid]); } catch (Throwable $e) {}
+            $userTransactions = safeFetchAll('SELECT * FROM coin_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 10', [$uid]);
+            $userReferrals = safeFetchAll('SELECT r.*, p.name FROM referrals r LEFT JOIN profiles p ON p.user_id=r.referred_id WHERE r.referrer_id=? ORDER BY r.created_at DESC LIMIT 10', [$uid]);
+            $userSecretRooms = safeFetchAll('SELECT * FROM secret_meeting_rooms WHERE user1_id=? OR user2_id=? ORDER BY created_at DESC LIMIT 5', [$uid,$uid]);
         }
         break;
-
     case 'reports':
         $reportStatus = $_GET['status'] ?? 'pending';
         try {
@@ -182,7 +180,6 @@ switch ($page) {
             else $reports = Database::fetchAll('SELECT r.*, p1.name AS reporter_name, p2.name AS reported_name, u1.bale_id AS reporter_bale_id, u2.bale_id AS reported_bale_id FROM reports r JOIN users u1 ON r.reporter_id = u1.id JOIN users u2 ON r.reported_id = u2.id LEFT JOIN profiles p1 ON p1.user_id = r.reporter_id LEFT JOIN profiles p2 ON p2.user_id = r.reported_id WHERE r.status = ? ORDER BY r.created_at DESC LIMIT 50', [$reportStatus]);
         } catch (Throwable $e) { $reports = []; }
         break;
-
     case 'broadcast': $broadcastCount = safeCount('SELECT COUNT(*) AS cnt FROM users WHERE is_active = 1 AND is_blocked = 0'); break;
     case 'settings': try { $settings = Database::fetchAll('SELECT * FROM settings ORDER BY id ASC'); } catch (Throwable $e) { $settings = []; } $settingLabels = ['bot_active'=>'وضعیت ربات','maintenance_message'=>'پیام تعمیر','free_daily_views'=>'محدودیت مشاهده روزانه','free_daily_likes'=>'محدودیت لایک روزانه','free_daily_secret'=>'محدودیت چت مخفیانه روزانه','vip_monthly_price'=>'قیمت VIP','welcome_message'=>'پیام خوش‌آمد',]; break;
     case 'coins':
@@ -190,28 +187,28 @@ switch ($page) {
         try { $topUsers = safeTopCoinUsers(15); } catch (Throwable $e) { $topUsers = []; }
         $coinHolders = safeCount('SELECT COUNT(*) AS cnt FROM coins WHERE balance > 0');
         $totalTransactions = safeCount('SELECT COUNT(*) AS cnt FROM coin_transactions');
-        try { $recentTransactions = Database::fetchAll('SELECT ct.*, p.name, u.bale_id FROM coin_transactions ct JOIN users u ON ct.user_id = u.id LEFT JOIN profiles p ON p.user_id = u.id ORDER BY ct.created_at DESC LIMIT 20'); } catch (Throwable $e) { $recentTransactions = []; }
+        $recentTransactions = safeFetchAll('SELECT ct.*, p.name, u.bale_id FROM coin_transactions ct JOIN users u ON ct.user_id = u.id LEFT JOIN profiles p ON p.user_id = u.id ORDER BY ct.created_at DESC LIMIT 20');
         break;
     case 'secret':
         $secretStats = ['active_rooms'=>safeCount('SELECT COUNT(*) as cnt FROM secret_meeting_rooms WHERE status="active"'),'today_rooms'=>safeCount('SELECT COUNT(*) as cnt FROM secret_meeting_rooms WHERE DATE(created_at)=CURDATE()'),'total_rooms'=>safeCount('SELECT COUNT(*) as cnt FROM secret_meeting_rooms'),'queue'=>safeCount('SELECT COUNT(*) as cnt FROM secret_meeting_queue')];
-        try { $activeRooms = Database::fetchAll('SELECT r.*, p1.name as user1_name, p2.name as user2_name FROM secret_meeting_rooms r LEFT JOIN profiles p1 ON p1.user_id=r.user1_id LEFT JOIN profiles p2 ON p2.user_id=r.user2_id WHERE r.status="active" ORDER BY r.created_at DESC LIMIT 20'); } catch (Throwable $e) { $activeRooms = []; }
-        try { $queueUsers = Database::fetchAll('SELECT q.*, p.name, p.city, u.bale_id, u.last_seen_at FROM secret_meeting_queue q JOIN users u ON q.user_id=u.id LEFT JOIN profiles p ON p.user_id=q.user_id ORDER BY q.vip_priority DESC, q.queued_at ASC LIMIT 30'); } catch (Throwable $e) { $queueUsers = []; }
+        $activeRooms = safeFetchAll('SELECT r.*, p1.name as user1_name, p2.name as user2_name FROM secret_meeting_rooms r LEFT JOIN profiles p1 ON p1.user_id=r.user1_id LEFT JOIN profiles p2 ON p2.user_id=r.user2_id WHERE r.status="active" ORDER BY r.created_at DESC LIMIT 20');
+        $queueUsers = safeFetchAll('SELECT q.*, p.name, p.city, u.bale_id, u.last_seen_at FROM secret_meeting_queue q JOIN users u ON q.user_id=u.id LEFT JOIN profiles p ON p.user_id=q.user_id ORDER BY q.vip_priority DESC, q.queued_at ASC LIMIT 30');
         break;
     case 'referrals':
         $totalReferrals = safeCount('SELECT COUNT(*) as cnt FROM referrals');
-        try { $topReferrers = Database::fetchAll('SELECT u.id, p.name, u.bale_id, COUNT(r.id) as cnt, SUM(r.bonus) as total_bonus FROM referrals r JOIN users u ON r.referrer_id=u.id LEFT JOIN profiles p ON p.user_id=u.id GROUP BY r.referrer_id ORDER BY cnt DESC LIMIT 20'); } catch (Throwable $e) { $topReferrers = []; }
-        try { $recentReferrals = Database::fetchAll('SELECT r.*, p1.name as referrer_name, p2.name as referred_name FROM referrals r LEFT JOIN profiles p1 ON p1.user_id=r.referrer_id LEFT JOIN profiles p2 ON p2.user_id=r.referred_id ORDER BY r.created_at DESC LIMIT 20'); } catch (Throwable $e) { $recentReferrals = []; }
+        $topReferrers = safeFetchAll('SELECT u.id, p.name, u.bale_id, COUNT(r.id) as cnt, SUM(r.bonus) as total_bonus FROM referrals r JOIN users u ON r.referrer_id=u.id LEFT JOIN profiles p ON p.user_id=u.id GROUP BY r.referrer_id ORDER BY cnt DESC LIMIT 20');
+        $recentReferrals = safeFetchAll('SELECT r.*, p1.name as referrer_name, p2.name as referred_name FROM referrals r LEFT JOIN profiles p1 ON p1.user_id=r.referrer_id LEFT JOIN profiles p2 ON p2.user_id=r.referred_id ORDER BY r.created_at DESC LIMIT 20');
         break;
     case 'vip':
         $vipStats = ['active'=>safeCount('SELECT COUNT(*) as cnt FROM vip_users WHERE is_active=1 AND expires_at > NOW()'),'expired'=>safeCount('SELECT COUNT(*) as cnt FROM vip_users WHERE expires_at < NOW()'),'today'=>safeCount('SELECT COUNT(*) as cnt FROM vip_users WHERE DATE(started_at)=CURDATE()')];
-        try { $vipUsers = Database::fetchAll('SELECT v.*, p.name, p.city, u.bale_id FROM vip_users v JOIN users u ON v.user_id=u.id LEFT JOIN profiles p ON p.user_id=v.user_id WHERE v.is_active=1 AND v.expires_at > NOW() ORDER BY v.expires_at ASC LIMIT 30'); } catch (Throwable $e) { $vipUsers = []; }
+        $vipUsers = safeFetchAll('SELECT v.*, p.name, p.city, u.bale_id FROM vip_users v JOIN users u ON v.user_id=u.id LEFT JOIN profiles p ON p.user_id=v.user_id WHERE v.is_active=1 AND v.expires_at > NOW() ORDER BY v.expires_at ASC LIMIT 30');
         break;
     case 'analytics':
         try { $analytics = ['users_by_city'=>Database::fetchAll('SELECT city, COUNT(*) as cnt FROM profiles GROUP BY city ORDER BY cnt DESC LIMIT 10'),'users_by_gender'=>Database::fetchAll('SELECT gender, COUNT(*) as cnt FROM profiles GROUP BY gender'),'users_by_age'=>Database::fetchAll('SELECT CASE WHEN age < 20 THEN "18-19" WHEN age < 25 THEN "20-24" WHEN age < 30 THEN "25-29" WHEN age < 35 THEN "30-34" ELSE "35+" END as range_age, COUNT(*) as cnt FROM profiles GROUP BY range_age ORDER BY range_age')]; } catch (Throwable $e) { $analytics = ['users_by_city'=>[],'users_by_gender'=>[],'users_by_age'=>[]]; }
         $dailyStats = []; for ($i=6;$i>=0;$i--) { $date = date('Y-m-d', strtotime("-$i days")); $dailyStats[] = ['date'=>$date,'label'=>date('m/d', strtotime($date)),'users'=>safeCount('SELECT COUNT(*) as cnt FROM users WHERE DATE(created_at)=?', [$date]),'secret'=>safeCount('SELECT COUNT(*) as cnt FROM secret_meeting_rooms WHERE DATE(created_at)=?', [$date]),'matches'=>safeCount('SELECT COUNT(*) as cnt FROM matches WHERE DATE(created_at)=?', [$date])]; }
         break;
     case 'logs':
-        $logFiles = glob(LOG_PATH . '*.log'); rsort($logFiles); $logFiles = array_slice($logFiles, 0, 20);
+        $logFiles = glob(LOG_PATH . '*.log'); if ($logFiles) rsort($logFiles); $logFiles = array_slice($logFiles ?: [], 0, 20);
         $selectedLog = $_GET['file'] ?? ($logFiles[0] ?? null);
         $logContent = '';
         if ($selectedLog && file_exists($selectedLog)) {
@@ -225,7 +222,11 @@ switch ($page) {
 }
 } catch (Throwable $e) {
     Logger::error('Admin page error: ' . $e->getMessage());
-    $error = 'خطای داخلی: ' . $e->getMessage();
+    if (empty($error)) $error = 'خطای داخلی: ' . $e->getMessage() . ' در ' . $e->getFile() . ':' . $e->getLine();
+    // Ensure variables exist to avoid blank page
+    $stats = $stats ?? [];
+    $recentUsers = $recentUsers ?? [];
+    $recentReports = $recentReports ?? [];
 }
 
 if ($page === 'login') { include __DIR__ . '/views/login.php'; exit; }
